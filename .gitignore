@@ -1,0 +1,12 @@
+# macOS
+.DS_Store
+
+# Vite build cache
+.vite
+
+# npm-related
+node_modules
+dist
+
+# Optional: OS metadata
+Thumbs.db
