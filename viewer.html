@@ -1,38 +1,56 @@
 <!DOCTYPE html>
 <html lang="ja">
 <head>
-  <meta charset="UTF-8">
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>評価結果ビューア</title>
   <style>
-    body { font-family: sans-serif; margin: 2em; line-height: 1.6; }
-    .navigation { margin: 1em 0; }
+    body { font-family: system-ui, -apple-system, "Segoe UI", Roboto, "Hiragino Sans", "Noto Sans JP", "Yu Gothic UI", "Meiryo", sans-serif; margin: 2em; line-height: 1.6; }
+    .navigation { margin: 1em 0; display: flex; align-items: center; gap: .75rem; flex-wrap: wrap; }
     .score { font-weight: bold; color: #222; margin-top: 1em; }
-    .label { font-weight: bold; margin-top: 1em; }
-    .box { border: 1px solid #ccc; padding: 1em; margin-bottom: 1em; border-radius: 5px; background: #f9f9f9; }
-    button { padding: 0.5em 1em; margin: 0 1em; }
+    .box { border: 1px solid #ccc; padding: 1em; margin: 1em 0; border-radius: 8px; background: #fafafa; }
+    button { padding: .5em .9em; border-radius: 8px; border: 1px solid #ddd; background: white; cursor: pointer; }
+    button:hover { background: #f2f2f2; }
+    input[type="number"] { padding: .4em; border-radius: 6px; border: 1px solid #ccc; }
+    .grid { display: grid; grid-template-columns: 1fr; gap: 20px; }
+    @media (min-width: 960px) { .grid { grid-template-columns: 1fr 1fr; } .col { padding: 10px; } .col.left { border-right: 1px solid #ddd; } }
+    .muted { color: #666; }
+    .meta p{ margin:.25em 0 }
+    .meta ul{ margin-top:.25em }
+    .giscus-wrap{ margin-top:2rem }
+    .error { color:#b00020; font-weight:600 }
   </style>
   <script src="https://cdn.jsdelivr.net/npm/papaparse@5.4.1/papaparse.min.js"></script>
 </head>
 <body>
   <h1>評価結果ビューア</h1>
+
   <div class="navigation">
     <button onclick="prev()">＜ 前へ</button>
-    <input
-      type="number"
-      id="counterInput"
-      min="1"
-      style="width: 60px; text-align: right;"
-    />
-    <span id="totalCount"></span>
+    <label for="counterInput" class="muted">#</label>
+    <input type="number" id="counterInput" min="1" style="width: 80px; text-align: right;" />
+    <span id="totalCount" class="muted"></span>
     <button onclick="next()">次へ ＞</button>
+    <span id="currentKey" class="muted" title="現在のAAT ID" style="margin-left:auto"></span>
   </div>
 
+  <div id="alerts"></div>
   <div id="content"></div>
 
+  <!-- giscus: コメント描画先 -->
+  <div id="giscus_thread" class="giscus-wrap"></div>
+
   <script>
+    // ================================
+    //  設定: CSV パス
+    // ================================
+    const CSV_PATH = "output_with_scores.csv";
+
+    // ================================
+    //  状態
+    // ================================
     let items = [];
-    let current = 0;
-    let currentIndex = 0;
+    let current = -1; // 未決定
 
     const evaluationCriteria = {
       1: "情報の抜けが無いか。つまり、「解説文（英語）」にある情報がその訳「解説文（人訳・修正）」で抜け落ちてないか。",
@@ -45,149 +63,245 @@
       8: "分野でよく使われる訳語と一致しているか。「解説文（人訳・修正）」に対して評価を行ってください。"
     };
 
+    // ================================
+    //  ユーティリティ
+    // ================================
+    function showAlert(msg){
+      const el = document.getElementById('alerts');
+      const box = document.createElement('div');
+      box.className = 'box error';
+      box.textContent = msg;
+      el.innerHTML = '';
+      el.appendChild(box);
+    }
+
     function parseReference(text) {
       if (!text) return "";
-
-      // 改行やスペースの後にURLが来るパターンに対応し、日付はあってもなくてもよい
       const match = text.match(/^(.*?)[\s\n]*(https?:\/\/[^\s]+)(?:\s+\d{4}-\d{1,2}-\d{1,2})?$/);
       if (match) {
         const label = match[1].trim();
         const url = match[2];
-        return `<a href="${url}" target="_blank">${label}</a>`;
+        return `<a href="${url}" target="_blank" rel="noopener noreferrer">${label}</a>`;
       }
-
-      return text; // マッチしなければそのまま返す
+      return text;
     }
 
-    function setupCounterInputNavigation() {
-      const input = document.getElementById("counterInput");
-      if (!input) return; // 要素が存在しない場合は何もしない
-
-      input.addEventListener("keydown", (e) => {
-        if (e.key === "Enter") {
-          const inputVal = parseInt(e.target.value);
-          if (!isNaN(inputVal) && inputVal >= 1 && inputVal <= items.length) {
-            current = inputVal - 1;
-            renderItem(current);
-          } else {
-            alert("1〜" + items.length + " の範囲で入力してください。");
-          }
-        }
-      });
+    function extractAatIdFromResource(res){
+      if (!res) return null;
+      const m = String(res).match(/(\d+)(?:\/?|#.*)?$/);
+      return m ? m[1] : null;
     }
 
-    function renderItem(index) {
+    function getAatIdForIndex(index){
+      const item = items[index];
+      const id = extractAatIdFromResource(item?.["リソース"]);
+      if (!id){
+        console.error(`[AAT ID missing] index=${index+1} resource="${item?.["リソース"] ?? ''}"`);
+        return null;
+      }
+      return id;
+    }
+
+    function findIndexByAatId(id){
+      if (!id) return -1;
+      return items.findIndex(it => extractAatIdFromResource(it?.["リソース"]) === String(id));
+    }
+
+    function updateURLWithAatId(aatId, replace=false){
+      if (!aatId){
+        console.error('[URL not updated] Missing AAT ID.');
+        return;
+      }
+      const url = new URL(window.location.href);
+      url.search = '';
+      url.searchParams.set('item', aatId);
+      if (replace){
+        history.replaceState({ aatId }, '', url.toString());
+      } else {
+        history.pushState({ aatId }, '', url.toString());
+      }
+      document.getElementById('currentKey').textContent = 'AAT ID: ' + aatId;
+    }
+
+    function reloadGiscus(){
+      const cont = document.getElementById('giscus_thread');
+      if (!cont) return;
+      cont.innerHTML = '';
+      const s = document.createElement('script');
+      s.src = 'https://giscus.app/client.js';
+      s.setAttribute('data-repo', 'Getty-AAT-ja/translation-checker');
+      s.setAttribute('data-repo-id', 'R_kgDOO5CiOg');
+      s.setAttribute('data-category', 'Proposal');
+      s.setAttribute('data-category-id', 'DIC_kwDOO5CiOs4Cu_jQ');
+      s.setAttribute('data-mapping', 'url');
+      s.setAttribute('data-strict', '0'); // 完全一致にしたい場合は "1"
+      s.setAttribute('data-reactions-enabled', '1');
+      s.setAttribute('data-emit-metadata', '0');
+      s.setAttribute('data-input-position', 'bottom');
+      s.setAttribute('data-theme', 'preferred_color_scheme');
+      s.setAttribute('data-lang', 'ja');
+      s.setAttribute('crossorigin', 'anonymous');
+      s.async = true;
+      cont.appendChild(s);
+    }
+
+    function renderItem(index){
       const item = items[index];
       if (!item) return;
 
-      document.getElementById("counterInput").value = index + 1;
-      document.getElementById("totalCount").textContent = "/ " + items.length;
+      const aatId = getAatIdForIndex(index);
+      if (!aatId){
+        showAlert('このアイテムには AAT の数値IDが見つかりません（詳細はコンソールを参照）。処理を中断します。');
+        return;
+      }
 
-      const content = document.getElementById("content");
-      const counter = document.getElementById("counterInput");
+      document.getElementById('counterInput').value = index + 1;
+      document.getElementById('totalCount').textContent = '/ ' + items.length;
 
+      const content = document.getElementById('content');
       const leftLabel = item["ラベル原文"] || "";
       const rightLabel = item["日本語ラベル(人訳)"] || "";
       const leftDesc = item["解説原文"] || "";
       const rightDesc = item["解説文(人訳)"] || "";
 
       let html = `
-        <div style="display: flex; gap: 20px;">
-          <div style="flex: 1; border-right: 1px solid #ccc; padding-right: 10px;">
+        <div class="grid">
+          <div class="col left">
             <h3>元ラベル</h3>
             <div>${leftLabel}</div>
             <h3>解説文（英語）</h3>
             <div>${leftDesc}</div>
           </div>
-          <div style="flex: 1; padding-left: 10px;">
+          <div class="col">
             <h3>日本語ラベル（人訳）</h3>
             <div>${rightLabel}</div>
             <h3>解説文（人訳・修正）</h3>
             <div>${rightDesc}</div>
           </div>
         </div>
-        <div class="additional-info">
-          <p><strong>リソース:</strong><br><a href="${item["リソース"]}" target="_blank">${item["リソース"]}</a></p>
-          <p><strong>タイプ:</strong><br>${item["タイプ"]}</p>
+        <div class="box meta">
+          <p><strong>リソース:</strong><br>${item["リソース"] ? `<a href="${item["リソース"]}" target="_blank" rel="noopener noreferrer">${item["リソース"]}</a>` : ''}</p>
+          <p><strong>タイプ:</strong><br>${item["タイプ"] || ''}</p>
           <p><strong>文献:</strong></p>
           <ul>
             <li>${parseReference(item["文献1"])}</li>
             <li>${parseReference(item["文献2"])}</li>
             <li>${parseReference(item["文献3"])}</li>
           </ul>
-          <p><strong>通番:</strong><br>${item["通番"]}</p>
+          <p><strong>AAT ID:</strong><br>${aatId}</p>
         </div>
-        <hr>
+        <hr />
       `;
 
-      for (let i = 1; i <= 8; i++) {
+      for (let i=1; i<=8; i++){
         const score = item[`Score_${i}`];
         const reason = item[`Reason_${i}`];
-        if (score !== "" || reason !== "") {
-          const criteria = evaluationCriteria[i] || "";
+        if (String(score ?? '') !== '' || String(reason ?? '') !== ''){
+          const criteria = evaluationCriteria[i] || '';
+          const scoreDisp = (score !== undefined && score !== null && score !== '') ? Math.round(score) : '?';
           html += `
             <div class="score"><strong>(${i}) ${criteria}</strong></div>
-            <div>スコア: ${Math.round(score) || "?"}/5</div>
-            <div>${reason || ""}</div>
-            <br>
+            <div>スコア: ${scoreDisp}/5</div>
+            <div>${reason || ''}</div>
+            <br />
           `;
         }
       }
 
-      html += `</div>`;
-
+      document.getElementById('alerts').innerHTML = '';
       content.innerHTML = html;
-      counter.textContent = `${index + 1} / ${items.length}`;
+
+      // URL をキーにするため、URL更新後に毎回 giscus を再初期化
+      updateURLWithAatId(aatId, /*replace*/ true);
+      reloadGiscus();
     }
 
-    function prev() {
-      if (current > 0) {
-        current--;
-        renderItem(current);
+    function goToIndex(index){
+      if (index < 0 || index >= items.length){
+        console.error(`[out of range] index=${index}`);
+        return;
       }
-    }
-
-    function next() {
-      if (current < items.length - 1) {
-        current++;
-        renderItem(current);
+      const aatId = getAatIdForIndex(index);
+      if (!aatId){
+        showAlert('このアイテムには AAT の数値IDが見つかりません（詳細はコンソールを参照）。移動を中止しました。');
+        return;
       }
+      current = index;
+      document.getElementById('alerts').innerHTML = '';
+      updateURLWithAatId(aatId);
+      renderItem(index);
     }
 
-    function setupKeyNavigation() {
-      document.addEventListener("keydown", (e) => {
-        if (e.key === "ArrowLeft") {
-          current = Math.max(0, current - 1);
-          renderItem(current);
-        } else if (e.key === "ArrowRight") {
-          current = Math.min(items.length - 1, current + 1);
-          renderItem(current);
+    function prev(){ if (current <= 0){ console.error('[nav] already at first item'); return; } goToIndex(current - 1); }
+    function next(){ if (current >= items.length - 1){ console.error('[nav] already at last item'); return; } goToIndex(current + 1); }
+
+    function setupKeyNavigation(){
+      document.addEventListener('keydown', (e) => {
+        if (e.key === 'ArrowLeft') { prev(); }
+        else if (e.key === 'ArrowRight') { next(); }
+      });
+    }
+
+    function setupCounterInputNavigation(){
+      const input = document.getElementById('counterInput');
+      if (!input) return;
+      input.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter'){
+          const val = parseInt(e.target.value);
+          if (!Number.isNaN(val)) goToIndex(val - 1);
         }
       });
     }
 
-    // CSVファイルを読み込んで初期表示
-    fetch("output_with_scores.csv")
-      .then(response => response.text())
+    // popstate（戻る/進む）: URL の AAT ID に従って移動（fallbackなし）
+    window.addEventListener('popstate', () => {
+      if (!items.length) return;
+      const url = new URL(window.location.href);
+      const slug = url.searchParams.get('item');
+      if (!slug){
+        console.error('[popstate] URL に ?item=<AAT_ID> が必要です');
+        showAlert('URL に ?item=<AAT_ID> が必要です。');
+        return;
+      }
+      const idx = findIndexByAatId(slug);
+      if (idx === -1){
+        console.error(`[popstate] 指定 AAT ID が CSV に見つかりません: ${slug}`);
+        showAlert('指定された AAT ID の行が CSV に見つかりません。');
+        return;
+      }
+      current = idx;
+      renderItem(idx);
+    });
+
+    // CSV 読み込み→初期表示
+    fetch(CSV_PATH)
+      .then(r => r.text())
       .then(csvText => {
         const parsed = Papa.parse(csvText, { header: true, skipEmptyLines: true });
         items = parsed.data;
-        if (items.length > 0) {
-          renderItem(current);
-        } else {
-          document.getElementById("content").innerHTML = "データがありません。";
+        document.getElementById('totalCount').textContent = '/ ' + items.length;
+
+        const url = new URL(window.location.href);
+        const slug = url.searchParams.get('item');
+        if (!slug){
+          console.error('[init] URL に ?item=<AAT_ID> が必要です');
+          showAlert('URL に ?item=<AAT_ID> が必要です。例: ?item=300133025');
+          return; // fallback しない
         }
-      })
-      .then(() => {
-        // items の準備ができた後にナビゲーションイベントを登録
-        if (items.length > 0) {
-          setupKeyNavigation();
-          setupCounterInputNavigation();
+        const startIndex = findIndexByAatId(slug);
+        if (startIndex === -1){
+          console.error(`[init] 指定 AAT ID が CSV に見つかりません: ${slug}`);
+          showAlert('指定された AAT ID の行が CSV に見つかりません。');
+          return; // fallback しない
         }
+        current = startIndex;
+        renderItem(startIndex);
+        setupKeyNavigation();
+        setupCounterInputNavigation();
       })
-      .catch(error => {
-        document.getElementById("content").innerHTML = "CSVの読み込みに失敗しました。";
-        console.error(error);
+      .catch(err => {
+        console.error('[csv] 読み込みエラー:', err);
+        showAlert('CSV の読み込みに失敗しました。');
       });
   </script>
 </body>
