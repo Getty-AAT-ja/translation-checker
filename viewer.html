@@ -310,50 +310,67 @@
         showAlert('CSV の読み込みに失敗しました。');
       });
 
+  function getTargetUrl() {
+    // canonical がある場合はそちらを使いたければ以下で取得して置換してください
+    // const c = document.querySelector('link[rel="canonical"]');
+    // return c ? c.href : location.href;
+    return location.href;
+  }
 
-      function getTargetUrl() {
-        // canonical がある場合はそちらを使いたければ以下で取得して置換してください
-        // const c = document.querySelector('link[rel="canonical"]');
-        // return c ? c.href : location.href;
-        return location.href;
-      }
+  // AAT ID を ?item= から取得（純粋な数字のみを有効とする）
+  function getAatId() {
+    const url = new URL(location.href);
+    const id = url.searchParams.get('item');
+    return id && /^[0-9]+$/.test(id) ? id : null;
+  }
 
-      function getDiscussionSearchURL() {
-        const q = encodeURIComponent(getTargetUrl());
-        return `https://github.com/Getty-AAT-ja/translation-checker/discussions?discussions_q=${q}`;
-      }
+  function getDiscussionSearchURL() {
+    // 検索は AAT ID を優先。無ければ URL で検索
+    const id = getAatId();
+    const term = encodeURIComponent(id ?? getTargetUrl());
+    return `https://github.com/Getty-AAT-ja/translation-checker/discussions?discussions_q=${term}`;
+  }
 
-      function getDiscussionCreateURL() {
-        const q = encodeURIComponent(getTargetUrl());
-        const t = encodeURIComponent(document.title || 'Discussion for this page');
-        return `https://github.com/Getty-AAT-ja/translation-checker/discussions/new?category=Proposal&title=${t}&body=${q}`;
-      }
+  function getDiscussionCreateURL() {
+    // title: "about [AAT ID]"（IDがなければ既存タイトル）
+    const id = getAatId();
+    const body = encodeURIComponent(getTargetUrl());
+    const title = encodeURIComponent(id ? `about ${id}` : (document.title || 'Discussion for this page'));
+    return `https://github.com/Getty-AAT-ja/translation-checker/discussions/new?category=Proposal&title=${title}&body=${body}`;
+  }
 
-      function openPopup(url, name = 'discussion_popup', w = 960, h = 720) {
-        const y = window.top.outerHeight / 2 + window.top.screenY - ( h / 2);
-        const x = window.top.outerWidth / 2 + window.top.screenX - ( w / 2);
-        const feats = `popup=yes,toolbar=no,location=yes,status=no,menubar=no,scrollbars=yes,resizable=yes,width=${w},height=${h},top=${Math.max(0, y)},left=${Math.max(0, x)}`;
-        const win = window.open(url, name, feats);
-        if (!win) {
-        alert('ポップアップをブロックしている可能性があります。このサイトのポップアップを許可してください。');
-        }
-        return win;
-      }
+  function openPopup(url, name = 'discussion_popup', w = 960, h = 720) {
+    const y = window.top.outerHeight / 2 + window.top.screenY - (h / 2);
+    const x = window.top.outerWidth  / 2 + window.top.screenX - (w / 2);
+    const feats = `popup=yes,toolbar=no,location=yes,status=no,menubar=no,scrollbars=yes,resizable=yes,width=${w},height=${h},top=${Math.max(0,y)},left=${Math.max(0,x)}`;
+    const win = window.open(url, name, feats);
+    if (!win) {
+      alert('ポップアップをブロックしている可能性があります。このサイトのポップアップを許可してください。');
+    }
+    return win;
+  }
 
-      function openCommentsPopup() {
-        openPopup(getDiscussionSearchURL());
-      }
+  function openCommentsPopup() {
+    openPopup(getDiscussionSearchURL());
+  }
 
+  function openCreateDiscussionPopup() {
+    openPopup(getDiscussionCreateURL(), 'discussion_create');
+  }
 
-      function openCreateDiscussionPopup() {
-        openPopup(getDiscussionCreateURL(), 'discussion_create');
-      }
-
-      // 表示上、現在の対象URLを明示
-      (function initTargetUrlBadge(){
-        const el = document.getElementById('targetUrl');
-        if (el) el.textContent = getTargetUrl();
-      })();
-  </script>
+  // 表示上、現在の対象URLと AAT ID を明示
+  (function initTargetUrlBadge(){
+    const el = document.getElementById('targetUrl');
+    if (el) el.textContent = getTargetUrl();
+    const id = getAatId();
+    if (el && el.parentElement) {
+      const badge = document.createElement('span');
+      badge.className = 'muted';
+      badge.style.marginLeft = '8px';
+      badge.textContent = id ? `(AAT ID: ${id})` : '(AAT ID: 未検出)';
+      el.parentElement.appendChild(badge);
+    }
+  })();
+</script>
 </body>
 </html>
