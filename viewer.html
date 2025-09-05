@@ -2,21 +2,6 @@
 <html lang="ja">
 <head>
   <meta charset="UTF-8" />
-  <meta http-equiv="Content-Security-Policy"
-  content="
-    default-src 'self';
-    img-src 'self' data: https:;
-    font-src 'self' data: https:;
-    style-src 'self' https://giscus.app 'unsafe-inline';
-    style-src-elem 'self' https://giscus.app 'unsafe-inline';
-    script-src 'self' https://giscus.app https://cdn.jsdelivr.net 'unsafe-inline' blob:;
-    script-src-elem 'self' https://giscus.app https://cdn.jsdelivr.net 'unsafe-inline' blob:;
-    frame-src https://giscus.app;
-    connect-src 'self' https://giscus.app https://api.github.com https://cdn.jsdelivr.net;
-    worker-src blob:;
-    base-uri 'none';
-    form-action 'none';
-  ">
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>評価結果ビューア</title>
   <style>
@@ -52,8 +37,14 @@
   <div id="alerts"></div>
   <div id="content"></div>
 
-  <!-- giscus: コメント描画先 -->
-  <div id="giscus_thread" class="giscus-wrap"></div>
+  <div class="box" style="background:#f7fbff;border-color:#cfe8ff">
+    <p>GitHub Discussion
+    <div style="display:flex; gap:.5rem; flex-wrap:wrap; align-items:center; margin-top:.5rem;">
+    <button onclick="openCommentsPopup()">コメントを見る / 投稿する（ポップアップ）</button>
+    <button onclick="openCreateDiscussionPopup()">新規ディスカッションを作成</button>
+    <span class="muted">対象URL: <code id="targetUrl"></code></span>
+    </div>
+  </div>
 
   <script>
     // ================================
@@ -318,6 +309,51 @@
         console.error('[csv] 読み込みエラー:', err);
         showAlert('CSV の読み込みに失敗しました。');
       });
+
+
+      function getTargetUrl() {
+        // canonical がある場合はそちらを使いたければ以下で取得して置換してください
+        // const c = document.querySelector('link[rel="canonical"]');
+        // return c ? c.href : location.href;
+        return location.href;
+      }
+
+      function getDiscussionSearchURL() {
+        const q = encodeURIComponent(getTargetUrl());
+        return `https://github.com/Getty-AAT-ja/translation-checker/discussions?discussions_q=${q}`;
+      }
+
+      function getDiscussionCreateURL() {
+        const q = encodeURIComponent(getTargetUrl());
+        const t = encodeURIComponent(document.title || 'Discussion for this page');
+        return `https://github.com/Getty-AAT-ja/translation-checker/discussions/new?category=Proposal&title=${t}&body=${q}`;
+      }
+
+      function openPopup(url, name = 'discussion_popup', w = 960, h = 720) {
+        const y = window.top.outerHeight / 2 + window.top.screenY - ( h / 2);
+        const x = window.top.outerWidth / 2 + window.top.screenX - ( w / 2);
+        const feats = `popup=yes,toolbar=no,location=yes,status=no,menubar=no,scrollbars=yes,resizable=yes,width=${w},height=${h},top=${Math.max(0, y)},left=${Math.max(0, x)}`;
+        const win = window.open(url, name, feats);
+        if (!win) {
+        alert('ポップアップをブロックしている可能性があります。このサイトのポップアップを許可してください。');
+        }
+        return win;
+      }
+
+      function openCommentsPopup() {
+        openPopup(getDiscussionSearchURL());
+      }
+
+
+      function openCreateDiscussionPopup() {
+        openPopup(getDiscussionCreateURL(), 'discussion_create');
+      }
+
+      // 表示上、現在の対象URLを明示
+      (function initTargetUrlBadge(){
+        const el = document.getElementById('targetUrl');
+        if (el) el.textContent = getTargetUrl();
+      })();
   </script>
 </body>
 </html>
