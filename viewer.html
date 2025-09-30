@@ -169,6 +169,9 @@
       const rightLabel = item["日本語ラベル(人訳)"] || "";
       const leftDesc = item["解説原文"] || "";
       const rightDesc = item["解説文(人訳)"] || "";
+      const assignedTo = item["担当"] || "";
+      const resourceURI = item["リソース"] || "";
+      const resourceURI_p = item["リソース"].replace("/aat","/page/aat") || "";
 
       let html = `
         <div class="grid">
@@ -186,7 +189,7 @@
           </div>
         </div>
         <div class="box meta">
-          <p><strong>リソース:</strong><br>${item["リソース"] ? `<a href="${item["リソース"]}" target="_blank" rel="noopener noreferrer">${item["リソース"]}</a>` : ''}</p>
+          <p><strong>リソース:</strong><br><a href="${resourceURI}" target="_blank" rel="noopener noreferrer">${resourceURI}</a> / <a href="${resourceURI_p}" target="_blank" rel="noopener noreferrer">[page]</a></p>
           <p><strong>タイプ:</strong><br>${item["タイプ"] || ''}</p>
           <p><strong>文献:</strong></p>
           <ul>
@@ -194,7 +197,7 @@
             <li>${parseReference(item["文献2"])}</li>
             <li>${parseReference(item["文献3"])}</li>
           </ul>
-          <p><strong>AAT ID:</strong><br>${aatId}</p>
+          <p><strong>AAT ID:</strong> ${aatId} / <strong>担当:</strong> ${assignedTo}</p>
         </div>
         <hr />
       `;
